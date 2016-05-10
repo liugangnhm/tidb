@@ -578,13 +578,18 @@ func (e *Evaluator) variable(v *ast.VariableExpr) bool {
 	globalVars := variable.GetGlobalVarAccessor(e.ctx)
 	if !v.IsSystem {
 		// user vars
-		if value, ok := sessionVars.Users[name]; ok {
+		value, ok := sessionVars.Users[name]
+		if !ok {
+			// select null user vars is permitted.
+			v.SetNull()
+			return true
+		}
+		if v.Value.Kind() == types.KindNull {
 			v.SetString(value)
 			return true
 		}
-		// select null user vars is permitted.
-		v.SetNull()
-		return true
+		sessionVars.Users[name]
+		v.SetString(v.Value.GetString())
 	}
 
 	_, ok := variable.SysVars[name]

@@ -27,6 +27,7 @@ package parser
 
 import (
 	"strings"
+	"fmt"
 	
 	"github.com/pingcap/tidb/mysql"
 	"github.com/pingcap/tidb/ast"
@@ -1753,6 +1754,7 @@ Field:
 	}
 |	Expression FieldAsNameOpt
 	{
+		fmt.Printf("expression:%v\n", $1)
 		expr := $1.(ast.ExprNode)
 		asName := $2.(string)
 		$$ = &ast.SelectField{Expr: expr, AsName: model.NewCIStr(asName)}
@@ -3668,6 +3670,7 @@ VariableAssignment:
 	}
 |	"USER_VAR" assignmentEq Expression
 	{
+		fmt.Println("assignmentEq:",assignmentEq)	
 		v := $1.(string)
 		v = strings.TrimPrefix(v, "@")
 		$$ = &ast.VariableAssignment{Name: v, Value: $3.(ast.ExprNode)}
@@ -3713,6 +3716,17 @@ UserVariable:
 		v := $1.(string)
 		v = strings.TrimPrefix(v, "@")
 		$$ = &ast.VariableExpr{Name: v, IsGlobal: false, IsSystem: false}
+	}
+|	"USER_VAR" assignmentEq Expression
+	{
+		v := $1.(string)
+		v = strings.TrimPrefix(v, "@")
+		$$ = &ast.VariableExpr{
+				Name: 	  v,
+				IsGlobal: false, 
+				IsSystem: false,
+				Value:	  $3.(ast.ExprNode),
+		}
 	}
 
 Username:

@@ -699,6 +699,12 @@ func (s *testSessionSuite) TestIssue1114(c *C) {
 	c.Assert(err, IsNil)
 	match(c, row.Data, 1)
 
+	fmt.Println("$$$$$$$$$$$$$$$$$$$$$$$")
+	r = mustExecSQL(c, se, "select @tmp1 = 1, @tmp2 := 2")
+	row, err = r.Next()
+	c.Assert(err, IsNil)
+	match(c, row.Data, nil, 2)
+
 	err = store.Close()
 	c.Assert(err, IsNil)
 }
