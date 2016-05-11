@@ -24,6 +24,7 @@ import (
 
 	"github.com/juju/errors"
 	"github.com/ngaut/log"
+	"github.com/pingcap/kvproto/pkg/errorpb"
 	pb "github.com/pingcap/kvproto/pkg/kvrpcpb"
 	"github.com/pingcap/pd/pd-client"
 	"github.com/pingcap/tidb/kv"
@@ -120,6 +121,16 @@ func (s *tikvStore) getRegion(k []byte) (*requestRegion, error) {
 	}, nil
 }
 
+// locateKey returns Region's versioned ID by key.
+func (s *tikvStore) locateKey(k []byte) (VersionedRegionID, error) {
+	region, err := s.regionCache.GetRegion(k)
+	if err != nil {
+		var vid VersionedRegionID
+		return vid, errors.Trace(err)
+	}
+	return region.GetVersionedID(), nil
+}
+
 func (s *tikvStore) Begin() (kv.Transaction, error) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
@@ -177,6 +188,52 @@ func (s *tikvStore) SendKVReq(req *pb.Request, region *requestRegion) (*pb.Respo
 		region, err = s.getRegion(region.GetLookupKey())
 		if err != nil {
 			return nil, errors.Trace(err)
+		}
+		client, err := s.getClient(region.GetAddress())
+		if err != nil {
+			return nil, errors.Trace(err)
+		}
+		req.Context = region.GetContext()
+		resp, err := client.SendKVReq(req)
+		if err != nil {
+			log.Warnf("send tikv request error: %v, try next store later", err)
+			s.regionCache.NextStore(region.GetID())
+			continue
+		}
+		if regionErr := resp.GetRegionError(); regionErr != nil {
+			// Retry if error is `NotLeader`.
+			if notLeader := regionErr.GetNotLeader(); notLeader != nil {
+				log.Warnf("tikv reports `NotLeader`: %s, retry later", notLeader.String())
+				s.regionCache.UpdateLeader(notLeader.GetRegionId(), notLeader.GetLeaderStoreId())
+				continue
+			}
+			// For other errors, we only drop cache here.
+			// Because caller may need to re-split the request.
+			log.Warnf("tikv reports region error: %v", resp.GetRegionError())
+			s.regionCache.DropRegion(req.GetContext().GetRegionId())
+			return resp, nil
+		}
+		if resp.GetType() != req.GetType() {
+			return nil, errors.Trace(errMismatch(resp, req))
+		}
+		return resp, nil
+	}
+	return nil, errors.Trace(backoffErr)
+}
+
+// SendKVReqByVersionedID sends req to tikv server. It will retry internally to
+// find the right region leader if i) fails to establish a connection to server
+// or ii) server returns `NotLeader`.
+func (s *tikvStore) SendKVReqByVersionedID(req *pb.Request, vid VersionedRegionID) (*pb.Response, error) {
+	var backoffErr error
+	for backoff := rpcBackoff(); backoffErr == nil; backoffErr = backoff() {
+		region := s.regionCache.GetRegionByVersionedID(vid)
+		if region == nil {
+			return &pb.Response{
+				RegionError: &errorpb.Error{
+					StaleEpoch: &errorpb.StaleEpoch{},
+				},
+			}, nil
 		}
 		client, err := s.getClient(region.GetAddress())
 		if err != nil {

@@ -82,30 +82,29 @@ func (c *txnCommitter) primary() []byte {
 	return c.keys[0]
 }
 
-func (c *txnCommitter) iterKeysByRegion(keys [][]byte, f func([][]byte) error) error {
-	groups := make(map[uint64][][]byte)
-	var primaryRegionID uint64
+func (c *txnCommitter) iterKeysByRegion(keys [][]byte, f func(VersionedRegionID, [][]byte) error) error {
+	groups := make(map[VersionedRegionID][][]byte)
+	var primaryRegionID VersionedRegionID
 	for _, k := range keys {
-		region, err := c.store.getRegion(k)
+		vid, err := c.store.locateKey(k)
 		if err != nil {
 			return errors.Trace(err)
 		}
-		id := region.GetID()
 		if bytes.Compare(k, c.primary()) == 0 {
-			primaryRegionID = id
+			primaryRegionID = vid
 		}
-		groups[id] = append(groups[id], k)
+		groups[vid] = append(groups[vid], k)
 	}
 
 	// Make sure the group that contains primary key goes first.
-	if primaryRegionID != 0 {
-		if err := f(groups[primaryRegionID]); err != nil {
+	if primaryRegionID.id != 0 {
+		if err := f(primaryRegionID, groups[primaryRegionID]); err != nil {
 			return errors.Trace(err)
 		}
 		delete(groups, primaryRegionID)
 	}
-	for _, g := range groups {
-		if err := f(g); err != nil {
+	for vid, g := range groups {
+		if err := f(vid, g); err != nil {
 			return errors.Trace(err)
 		}
 	}
@@ -124,7 +123,7 @@ func (c *txnCommitter) keySize(key []byte) int {
 	return len(key)
 }
 
-func (c *txnCommitter) prewriteSingleRegion(keys [][]byte) error {
+func (c *txnCommitter) prewriteSingleRegion(vid VersionedRegionID, keys [][]byte) error {
 	mutations := make([]*pb.Mutation, len(keys))
 	for i, k := range keys {
 		mutations[i] = c.mutations[string(k)]
@@ -140,11 +139,7 @@ func (c *txnCommitter) prewriteSingleRegion(keys [][]byte) error {
 
 	var backoffErr error
 	for backoff := txnLockBackoff(); backoffErr == nil; backoffErr = backoff() {
-		region, err := c.store.getRegion(keys[0])
-		if err != nil {
-			return errors.Trace(err)
-		}
-		resp, err := c.store.SendKVReq(req, region)
+		resp, err := c.store.SendKVReqByVersionedID(req, vid)
 		if err != nil {
 			return errors.Trace(err)
 		}
@@ -182,7 +177,7 @@ func (c *txnCommitter) prewriteSingleRegion(keys [][]byte) error {
 	return errors.Annotate(backoffErr, txnRetryableMark)
 }
 
-func (c *txnCommitter) commitSingleRegion(keys [][]byte) error {
+func (c *txnCommitter) commitSingleRegion(vid VersionedRegionID, keys [][]byte) error {
 	req := &pb.Request{
 		Type: pb.MessageType_CmdCommit.Enum(),
 		CmdCommitReq: &pb.CmdCommitRequest{
@@ -192,11 +187,7 @@ func (c *txnCommitter) commitSingleRegion(keys [][]byte) error {
 		},
 	}
 
-	region, err := c.store.getRegion(keys[0])
-	if err != nil {
-		return errors.Trace(err)
-	}
-	resp, err := c.store.SendKVReq(req, region)
+	resp, err := c.store.SendKVReqByVersionedID(req, vid)
 	if err != nil {
 		return errors.Trace(err)
 	}
@@ -230,7 +221,7 @@ func (c *txnCommitter) commitSingleRegion(keys [][]byte) error {
 	return nil
 }
 
-func (c *txnCommitter) cleanupSingleRegion(keys [][]byte) error {
+func (c *txnCommitter) cleanupSingleRegion(vid VersionedRegionID, keys [][]byte) error {
 	// TODO: add batch RPC call.
 	for _, k := range keys {
 		req := &pb.Request{
@@ -240,11 +231,11 @@ func (c *txnCommitter) cleanupSingleRegion(keys [][]byte) error {
 				StartVersion: proto.Uint64(c.startTS),
 			},
 		}
-		region, err := c.store.getRegion(k)
+		vid, err := c.store.locateKey(k)
 		if err != nil {
 			return errors.Trace(err)
 		}
-		c.store.SendKVReq(req, region)
+		c.store.SendKVReqByVersionedID(req, vid)
 		// TODO: check response and retry
 	}
 	return nil
@@ -293,15 +284,15 @@ const txnCommitBatchSize = 512 * 1024
 
 // batchIterfn wraps an iteration function and returns a new one that iterates
 // keys by batch size.
-func batchIterFn(f func([][]byte) error, sizeFn func([]byte) int) func([][]byte) error {
-	return func(keys [][]byte) error {
+func batchIterFn(f func(VersionedRegionID, [][]byte) error, sizeFn func([]byte) int) func(VersionedRegionID, [][]byte) error {
+	return func(vid VersionedRegionID, keys [][]byte) error {
 		var start, end int
 		for start = 0; start < len(keys); start = end {
 			var size int
 			for end = start; end < len(keys) && size < txnCommitBatchSize; end++ {
 				size += sizeFn(keys[end])
 			}
-			if err := f(keys[start:end]); err != nil {
+			if err := f(vid, keys[start:end]); err != nil {
 				return errors.Trace(err)
 			}
 		}

@@ -49,6 +49,17 @@ func (c *RegionCache) GetRegion(key []byte) (*Region, error) {
 	return r, errors.Trace(err)
 }
 
+// GetRegionByVersionedID finds a Region in cache by VersionedID.
+func (c *RegionCache) GetRegionByVersionedID(vid VersionedRegionID) *Region {
+	c.mu.RLock()
+	defer c.mu.RUnlock()
+
+	if region, ok := c.regions[vid.id]; ok && region.GetVersionedID() == vid {
+		return region
+	}
+	return nil
+}
+
 // DropRegion remove some region cache.
 func (c *RegionCache) DropRegion(regionID uint64) {
 	c.mu.Lock()
@@ -176,27 +187,43 @@ type Region struct {
 	curStoreIdx int
 }
 
-// GetID return id.
+// GetID returns the region's id.
 func (r *Region) GetID() uint64 {
 	return r.meta.GetId()
 }
 
-// StartKey return StartKey.
+// StartKey returns the region's StartKey.
 func (r *Region) StartKey() []byte {
 	return r.meta.StartKey
 }
 
-// EndKey return EndKey.
+// EndKey returns the region's EndKey.
 func (r *Region) EndKey() []byte {
 	return r.meta.EndKey
 }
 
-// GetAddress return address.
+// GetAddress returns the region's address.
 func (r *Region) GetAddress() string {
 	return r.addr
 }
 
-// GetContext construct kvprotopb.Context from region info.
+// GetVersionedID returns the unique identifier of the region.
+func (r *Region) GetVersionedID() VersionedRegionID {
+	return VersionedRegionID{
+		id:      r.GetID(),
+		confVer: r.meta.GetRegionEpoch().GetConfVer(),
+		ver:     r.meta.GetRegionEpoch().GetVersion(),
+	}
+}
+
+// VersionedRegionID is used for uniquely identifies a Region.
+type VersionedRegionID struct {
+	id      uint64
+	confVer uint64
+	ver     uint64
+}
+
+// GetContext constructs kvprotopb.Context from region info.
 func (r *Region) GetContext() *kvrpcpb.Context {
 	return &kvrpcpb.Context{
 		RegionId:    r.meta.Id,
