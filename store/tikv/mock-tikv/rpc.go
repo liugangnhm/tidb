@@ -14,6 +14,8 @@
 package mocktikv
 
 import (
+	"time"
+
 	"github.com/golang/protobuf/proto"
 	"github.com/juju/errors"
 	"github.com/pingcap/kvproto/pkg/coprocessor"
@@ -291,10 +293,14 @@ type RPCClient struct {
 	addr      string
 	cluster   *Cluster
 	mvccStore *MvccStore
+	delay     time.Duration
 }
 
 // SendKVReq sends a kv request to mock cluster.
 func (c *RPCClient) SendKVReq(req *kvrpcpb.Request) (*kvrpcpb.Response, error) {
+	if c.delay > 0 {
+		time.Sleep(c.delay)
+	}
 	store := c.cluster.GetStoreByAddr(c.addr)
 	if store == nil {
 		return nil, errors.New("connect fail")
@@ -305,6 +311,9 @@ func (c *RPCClient) SendKVReq(req *kvrpcpb.Request) (*kvrpcpb.Response, error) {
 
 // SendCopReq sends a coprocessor request to mock cluster.
 func (c *RPCClient) SendCopReq(req *coprocessor.Request) (*coprocessor.Response, error) {
+	if c.delay > 0 {
+		time.Sleep(c.delay)
+	}
 	return nil, errors.New("not implemented")
 }
 
@@ -314,10 +323,11 @@ func (c *RPCClient) Close() error {
 }
 
 // NewRPCClient creates an RPCClient.
-func NewRPCClient(cluster *Cluster, mvccStore *MvccStore, addr string) *RPCClient {
+func NewRPCClient(cluster *Cluster, mvccStore *MvccStore, delay time.Duration, addr string) *RPCClient {
 	return &RPCClient{
 		addr:      addr,
 		cluster:   cluster,
 		mvccStore: mvccStore,
+		delay:     delay,
 	}
 }

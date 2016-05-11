@@ -13,7 +13,10 @@
 
 package mocktikv
 
-import "fmt"
+import (
+	"fmt"
+	"time"
+)
 
 // BootstrapWithSingleStore initializes a Cluster with 1 Region and 1 Store.
 func BootstrapWithSingleStore(cluster *Cluster) (storeID, regionID uint64) {
@@ -45,4 +48,17 @@ func BootstrapWithMultiRegions(cluster *Cluster, splitKeys ...[]byte) (storeID u
 		cluster.Split(regionIDs[i], regionIDs[i+1], k, storeID)
 	}
 	return
+}
+
+// PlanSplit schedules a split in the future.
+func PlanSplit(cluster *Cluster, regionID uint64, key []byte, leaderStoreID uint64, delay time.Duration) chan<- uint64 {
+	ch := make(chan uint64)
+	go func() {
+		time.Sleep(delay)
+		id := cluster.AllocID()
+		cluster.Split(regionID, id, key, leaderStoreID)
+		ch <- id
+		close(ch)
+	}()
+	return ch
 }

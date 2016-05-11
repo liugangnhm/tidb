@@ -25,7 +25,7 @@ type testScanMockSuite struct {
 var _ = Suite(&testScanMockSuite{})
 
 func (s *testScanMockSuite) TestScanMultipleRegions(c *C) {
-	store, cluster := createMockStoreCluster()
+	store, cluster := createMockStoreCluster(0)
 	mocktikv.BootstrapWithMultiRegions(cluster, []byte("a"), []byte("m"))
 
 	txn, err := store.Begin()
@@ -55,7 +55,7 @@ func (s *testScanMockSuite) TestScanMultipleRegions(c *C) {
 }
 
 func (s *testScanMockSuite) TestStaleRegionEpoch(c *C) {
-	store, cluster := createMockStoreCluster()
+	store, cluster := createMockStoreCluster(0)
 	storeID, regionID := mocktikv.BootstrapWithSingleStore(cluster)
 
 	txn, err := store.Begin()

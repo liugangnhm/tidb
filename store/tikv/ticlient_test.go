@@ -41,22 +41,22 @@ func newTestStore(c *C) *tikvStore {
 		c.Assert(err, IsNil)
 		return store.(*tikvStore)
 	}
-	store, cluster := createMockStoreCluster()
+	store, cluster := createMockStoreCluster(0)
 	mocktikv.BootstrapWithSingleStore(cluster)
 	return store
 }
 
-func createMockStoreCluster() (*tikvStore, *mocktikv.Cluster) {
+func createMockStoreCluster(delay time.Duration) (*tikvStore, *mocktikv.Cluster) {
 	cluster := mocktikv.NewCluster()
 	mvccStore := mocktikv.NewMvccStore()
-	clientFactory := mockClientFactory(cluster, mvccStore)
+	clientFactory := mockClientFactory(cluster, mvccStore, delay)
 	store := newTikvStore("mock-tikv-store", mocktikv.NewPDClient(cluster), clientFactory)
 	return store, cluster
 }
 
-func mockClientFactory(cluster *mocktikv.Cluster, mvccStore *mocktikv.MvccStore) ClientFactory {
+func mockClientFactory(cluster *mocktikv.Cluster, mvccStore *mocktikv.MvccStore, delay time.Duration) ClientFactory {
 	return func(addr string) (Client, error) {
-		return mocktikv.NewRPCClient(cluster, mvccStore, addr), nil
+		return mocktikv.NewRPCClient(cluster, mvccStore, delay, addr), nil
 	}
 }
 
